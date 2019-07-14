@@ -13,6 +13,7 @@ import copy
 
 from ..css import PageType, computed_from_cascaded
 from ..formatting_structure import boxes, build
+from ..formatting_structure.boxes import MarginBox
 from ..logger import PROGRESS_LOGGER
 from .absolute import absolute_layout
 from .blocks import block_container_layout, block_level_layout
@@ -179,101 +180,212 @@ def compute_fixed_dimension(context, box, outer, vertical, top_or_left):
     box.restore_box_attributes()
 
 
-def compute_variable_dimension(context, side_boxes, vertical, outer_sum):
-    """
-    Compute and set a margin box fixed dimension on ``box``, as described in:
-    http://dev.w3.org/csswg/css3-page/#margin-dimension
+# def compute_variable_dimension(context, side_boxes, vertical, outer_sum):
+#     """
+#     Compute and set a margin box fixed dimension on ``box``, as described in:
+#     http://dev.w3.org/csswg/css3-page/#margin-dimension
+#
+#     :param side_boxes: Three boxes on a same side (as opposed to a corner.)
+#         A list of:
+#         - A @*-left or @*-top margin box
+#         - A @*-center or @*-middle margin box
+#         - A @*-right or @*-bottom margin box
+#     :param vertical:
+#         True to set height, margin-top and margin-bottom; False for width,
+#         margin-left and margin-right
+#     :param outer_sum:
+#         The target total outer dimension (max box width or height)
+#
+#     """
+#     box_class = VerticalBox if vertical else HorizontalBox
+#     side_boxes = [box_class(context, box) for box in side_boxes]
+#     box_a, box_b, box_c = side_boxes
+#
+#     # 5.3.2.1 in spec
+#     # margins
+#     for box in side_boxes:
+#         if box.margin_a == 'auto':
+#             box.margin_a = 0
+#         if box.margin_b == 'auto':
+#             box.margin_b = 0
+#
+#     # 5.3.2.2 in spec
+#     # resolve 'auto' widths
+#     if box_b.box.is_generated: # Q: where is the 'is_generated' attribute defined? A: make_box ~ line 338
+#         # if box B is generated, try to center it
+#         if box_b.inner == 'auto':
+#             ac_max_content_size = 2 * max(
+#                 box_a.outer_max_content_size, box_c.outer_max_content_size)
+#             if outer_sum >= (
+#                     box_b.outer_max_content_size + ac_max_content_size):
+#                 box_b.inner = box_b.max_content_size
+#             else:
+#                 ac_min_content_size = 2 * max(
+#                     box_a.outer_min_content_size,
+#                     box_c.outer_min_content_size)
+#                 box_b.inner = box_b.min_content_size
+#                 available = outer_sum - box_b.outer - ac_min_content_size
+#                 if available > 0:
+#                     weight_ac = ac_max_content_size - ac_min_content_size
+#                     weight_b = (
+#                         box_b.max_content_size - box_b.min_content_size)
+#                     weight_sum = weight_ac + weight_b
+#                     # By definition of max_content_size and min_content_size,
+#                     # weights can not be negative. weight_sum == 0 implies that
+#                     # max_content_size == min_content_size for each box, in
+#                     # which case the sum can not be both <= and > outer_sum
+#                     # Therefore, one of the last two 'if' statements would not
+#                     # have lead us here.
+#                     assert weight_sum > 0
+#                     box_b.inner += available * weight_b / weight_sum
+#                     # I think this is equivalent to
+#                     # used_outer_width = used_outer
+#         if box_a.inner == 'auto':
+#             box_a.shrink_to_fit((outer_sum - box_b.outer) / 2 - box_a.sugar)
+#         if box_c.inner == 'auto':
+#             box_c.shrink_to_fit((outer_sum - box_b.outer) / 2 - box_c.sugar)
+#     else: # If the middle box (B) is not generated, then it cannot be centered,
+#         # so we focus on priority 2: minimizing overflow and overlap
+#
+#         # Non-generated boxes get zero for every box-model property
+#         assert box_b.inner == 0
+#         if box_a.inner == box_c.inner == 'auto': # inner == width for horizontal boxes
+#             if outer_sum >= ( # if overflow is not possible  #uses strict inequality for this case
+#                     box_a.outer_max_content_size +
+#                     box_c.outer_max_content_size):
+#                 # let A and C take up the largest possible width. We are safe.
+#                 box_a.inner = box_a.max_content_size # spec has a flex factor computation here
+#                 box_c.inner = box_c.max_content_size
+#             else: # otherwise, there is potential for overflow, so there is more work to do
+#                 # to determine the widths of A and C
+#                 box_a.inner = box_a.min_content_size
+#                 box_c.inner = box_c.min_content_size
+#                 # set the actual widths to the min_content_sizes
+#                 available = outer_sum - box_a.outer - box_c.outer
+#                 # available is called flex-space in the specs
+#                 # outer_sum is called available_width in the specs
+#                 if available > 0:
+#                     weight_a = (
+#                         box_a.max_content_size - box_a.min_content_size)
+#                     weight_c = (
+#                         box_c.max_content_size - box_c.min_content_size)
+#                     weight_sum = weight_a + weight_c
+#                     # By definition of max_content_size and min_content_size,
+#                     # weights can not be negative. weight_sum == 0 implies that
+#                     # max_content_size == min_content_size for each box, in
+#                     # which case the sum can not be both <= and > outer_sum
+#                     # Therefore, one of the last two 'if' statements would not
+#                     # have lead us here.
+#                     assert weight_sum > 0
+#                     box_a.inner += available * weight_a / weight_sum # update inner because outer is a computed property
+#                     box_c.inner += available * weight_c / weight_sum
+#         elif box_a.inner == 'auto':
+#             box_a.shrink_to_fit(outer_sum - box_c.outer - box_a.sugar)
+#         elif box_c.inner == 'auto':
+#             box_c.shrink_to_fit(outer_sum - box_a.outer - box_c.sugar)
+#
+#     # And, we’re done!
+#     assert 'auto' not in [box.inner for box in side_boxes]
+#     # Set the actual attributes back.
+#     for box in side_boxes:
+#         box.restore_box_attributes()
 
-    :param side_boxes: Three boxes on a same side (as opposed to a corner.)
-        A list of:
-        - A @*-left or @*-top margin box
-        - A @*-center or @*-middle margin box
-        - A @*-right or @*-bottom margin box
-    :param vertical:
-        True to set height, margin-top and margin-bottom; False for width,
-        margin-left and margin-right
-    :param outer_sum:
-        The target total outer dimension (max box width or height)
 
-    """
+def resolve_auto_margins(boxes, margins):
+    for box in boxes:
+        for margin in margins:
+            if getattr(box, margin) == 'auto':
+                setattr(box, margin, 0)
+    return boxes
+
+
+def resolve_auto_widths(context, boxes, vertical, available_space):
+    if len(boxes) == 3:
+        box_a, box_b, box_c = boxes
+        if not box_b.box.is_generated:
+            # Non-generated boxes get zero for every box-model property
+            assert box_b.inner == 0
+            if box_a.inner == box_c.inner == 'auto':
+                box_a, box_c = resolve_auto_widths(
+                          context, (box_a, box_c), vertical, available_space)
+                return (box_a, box_b, box_c)
+            # at most one of box_a, box_c is 'auto'
+            auto_box, fixed_box = (
+                sorted(boxes, key=lambda box: not box.inner == 'auto'))
+            if auto_box.inner == 'auto':
+                auto_box.inner = available - fixed_box.outer - auto_box.sugar
+            return (box_a, box_b, box_c)
+
+        # box_b.box.is_generated
+        # define box ac
+        box_cls = VerticalBox if vertical else HorizontalBox
+        box_ac = MarginBox(None, None)
+        if vertical:
+            box_ac.width = 2 * max(box_a.inner, box_c.inner)
+        else:
+            box_ac.height = 2 * max(box_a.inner, box_c.inner)
+        box_ac = box_cls(context, MarginBox(None, None)) # dummy box
+        for attr in ('outer_max_content_size', 'outer_min_content_size',
+            'max_content_size', 'min_content_size', 'margin_a', 'margin_b',
+            ):
+            setattr(box_ac, attr,
+                2 * max(getattr(box, attr) for box in (box_a, box_c)))
+
+        box_b, box_ac = resolve_auto_widths(
+            context, (box_b, box_ac), vertical, available_space)
+
+        for box in (box_a, box_c):
+            if box.inner == 'auto':
+                box.inner = (available_space - box_b.outer)/2 - box.sugar
+
+        return (box_a, box_b, box_c)
+
+    elif len(boxes) == 2:
+        flex_space = (
+            available_space - sum(box.outer_max_content_size for box in boxes))
+        if flex_space > 0:
+            flex_factors = tuple(box.outer_max_content_size for box in boxes)
+
+            return adjust_to_flex_space(
+                boxes, flex_space, flex_factors, 'max_content_size')
+
+        flex_space = (
+            available_space - sum(box.outer_min_content_size for box in boxes))
+        if flex_space > 0:
+            flex_factors = (
+                tuple(box.max_content_size - box.min_content_size for box in boxes))
+
+            return adjust_to_flex_space(
+                boxes, flex_space, flex_factors, 'min_content_size')
+
+        flex_factors = tuple(box.outer_min_content_size for box in boxes)
+
+        return adjust_to_flex_space(
+            boxes, flex_space, flex_factors, 'min_content_size')
+
+    else:
+        raise ValueError(f'Invalid number of boxes ({len(boxes)}).')
+
+
+def adjust_to_flex_space(boxes, flex_space, flex_factors, box_base_size):
+    for (box, flex_factor) in zip(boxes, flex_factors):
+        box.inner = getattr(box, box_base_size)
+        try:
+            box.inner += flex_space * flex_factor / sum(flex_factors)
+        except ZeroDivisionError:
+            box.inner += flex_space * 0.5
+    return boxes
+
+
+def compute_variable_dimension(context, side_boxes, vertical, available_space):
     box_class = VerticalBox if vertical else HorizontalBox
     side_boxes = [box_class(context, box) for box in side_boxes]
-    box_a, box_b, box_c = side_boxes
-
-    for box in side_boxes:
-        if box.margin_a == 'auto':
-            box.margin_a = 0
-        if box.margin_b == 'auto':
-            box.margin_b = 0
-
-    if box_b.box.is_generated:
-        if box_b.inner == 'auto':
-            ac_max_content_size = 2 * max(
-                box_a.outer_max_content_size, box_c.outer_max_content_size)
-            if outer_sum >= (
-                    box_b.outer_max_content_size + ac_max_content_size):
-                box_b.inner = box_b.max_content_size
-            else:
-                ac_min_content_size = 2 * max(
-                    box_a.outer_min_content_size,
-                    box_c.outer_min_content_size)
-                box_b.inner = box_b.min_content_size
-                available = outer_sum - box_b.outer - ac_min_content_size
-                if available > 0:
-                    weight_ac = ac_max_content_size - ac_min_content_size
-                    weight_b = (
-                        box_b.max_content_size - box_b.min_content_size)
-                    weight_sum = weight_ac + weight_b
-                    # By definition of max_content_size and min_content_size,
-                    # weights can not be negative. weight_sum == 0 implies that
-                    # max_content_size == min_content_size for each box, in
-                    # which case the sum can not be both <= and > outer_sum
-                    # Therefore, one of the last two 'if' statements would not
-                    # have lead us here.
-                    assert weight_sum > 0
-                    box_b.inner += available * weight_b / weight_sum
-        if box_a.inner == 'auto':
-            box_a.shrink_to_fit((outer_sum - box_b.outer) / 2 - box_a.sugar)
-        if box_c.inner == 'auto':
-            box_c.shrink_to_fit((outer_sum - box_b.outer) / 2 - box_c.sugar)
-    else:
-        # Non-generated boxes get zero for every box-model property
-        assert box_b.inner == 0
-        if box_a.inner == box_c.inner == 'auto':
-            if outer_sum >= (
-                    box_a.outer_max_content_size +
-                    box_c.outer_max_content_size):
-                box_a.inner = box_a.max_content_size
-                box_c.inner = box_c.max_content_size
-            else:
-                box_a.inner = box_a.min_content_size
-                box_c.inner = box_c.min_content_size
-                available = outer_sum - box_a.outer - box_c.outer
-                if available > 0:
-                    weight_a = (
-                        box_a.max_content_size - box_a.min_content_size)
-                    weight_c = (
-                        box_c.max_content_size - box_c.min_content_size)
-                    weight_sum = weight_a + weight_c
-                    # By definition of max_content_size and min_content_size,
-                    # weights can not be negative. weight_sum == 0 implies that
-                    # max_content_size == min_content_size for each box, in
-                    # which case the sum can not be both <= and > outer_sum
-                    # Therefore, one of the last two 'if' statements would not
-                    # have lead us here.
-                    assert weight_sum > 0
-                    box_a.inner += available * weight_a / weight_sum
-                    box_c.inner += available * weight_c / weight_sum
-        elif box_a.inner == 'auto':
-            box_a.shrink_to_fit(outer_sum - box_c.outer - box_a.sugar)
-        elif box_c.inner == 'auto':
-            box_c.shrink_to_fit(outer_sum - box_a.outer - box_c.sugar)
-
-    # And, we’re done!
-    assert 'auto' not in [box.inner for box in side_boxes]
-    # Set the actual attributes back.
+    side_boxes = resolve_auto_margins(side_boxes, ('margin_a', 'margin_b'))
+    side_boxes = resolve_auto_widths(context, side_boxes, vertical, available_space)
+    assert not any(box.inner == 'auto' for box in side_boxes)
     for box in side_boxes:
         box.restore_box_attributes()
+    return side_boxes
 
 
 def _standardize_page_based_counters(style, pseudo_type):
@@ -392,7 +504,7 @@ def make_margin_boxes(context, page, state):
         if not any(box.is_generated for box in side_boxes):
             continue
         # We need the three boxes together for the variable dimension:
-        compute_variable_dimension(
+        side_boxes = compute_variable_dimension(
             context, side_boxes, vertical, variable_outer)
         for box, offset in zip(side_boxes, [0, 0.5, 1]):
             if not box.is_generated:
